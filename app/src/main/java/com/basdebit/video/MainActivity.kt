@@ -4,12 +4,14 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.webkit.*
 import android.widget.*
 import org.w3c.dom.Element
@@ -27,17 +29,17 @@ import javax.xml.transform.stream.StreamResult
 class MainActivity : Activity() {
 
     private lateinit var web: WebView
-    private lateinit var urlBar: EditText
     private lateinit var qualityBtn: Button
-    private lateinit var root: LinearLayout
+    private lateinit var frame: FrameLayout
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     // 0 = désactivé (qualité du site), sinon hauteur max en pixels (144, 240, 360)
     @Volatile private var maxHeight = 240
 
+    private val homeUrl = "https://kool.to/"
     private val choices = intArrayOf(72, 90, 96, 120, 144, 240, 360, 0)
-    private val labels = arrayOf("72p", "90p", "96p", "120p", "144p", "240p", "360p", "Auto (qualité du site)")
+    private val labels = arrayOf("72p", "90p", "96p", "120p", "144p", "240p", "360p", "HD (qualité du site)")
 
     private val injectedJs = """
         (function(){
@@ -57,40 +59,81 @@ class MainActivity : Activity() {
         })();
     """.trimIndent()
 
-    @SuppressLint("SetJavaScriptEnabled")
+    // Empreinte (SHA-256 + sel) du code d'activation : le code lui-même n'est écrit nulle part.
+    private val codeHash = "a86e1b7a67346515d3f6856d899dec9d1f39bcceefb28739c9a38a0025771a5d"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (getSharedPreferences("p", MODE_PRIVATE).getBoolean("unlocked", false)) buildApp() else askCode(0)
+    }
+
+    private fun sha256(s: String): String {
+        val d = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(("kool-salt-v1:" + s).toByteArray(Charsets.UTF_8))
+        return d.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun askCode(attempts: Int) {
+        val input = EditText(this).apply {
+            hint = "Code d'activation"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val box = FrameLayout(this).apply {
+            setPadding(dp(24), dp(12), dp(24), 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Code d'activation")
+            .setView(box)
+            .setCancelable(false)
+            .setPositiveButton("Valider") { _, _ ->
+                if (sha256(input.text.toString().trim()) == codeHash) {
+                    getSharedPreferences("p", MODE_PRIVATE).edit().putBoolean("unlocked", true).apply()
+                    buildApp()
+                } else if (attempts + 1 >= 5) {
+                    finish()
+                } else {
+                    Toast.makeText(this, "Code incorrect", Toast.LENGTH_SHORT).show()
+                    askCode(attempts + 1)
+                }
+            }
+            .setNegativeButton("Quitter") { _, _ -> finish() }
+            .show()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun buildApp() {
         val prefs = getSharedPreferences("p", MODE_PRIVATE)
         maxHeight = prefs.getInt("maxHeight", 240)
 
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        web = WebView(this)
+        frame = FrameLayout(this)
+        frame.addView(web, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        urlBar = EditText(this).apply {
-            hint = "Adresse ou recherche"
-            setSingleLine()
-            imeOptions = EditorInfo.IME_ACTION_GO
-            setOnEditorActionListener { _, _, _ -> go(text.toString()); true }
-        }
-        val goBtn = Button(this).apply {
-            text = "OK"
-            setOnClickListener { go(urlBar.text.toString()) }
-        }
         qualityBtn = Button(this).apply {
+            setAllCaps(false)
+            textSize = 12f
+            setTextColor(Color.WHITE)
             text = labelFor(maxHeight)
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(0xCC000000.toInt())
+                setStroke(dp(1), 0x66FFFFFF)
+            }
             setOnClickListener { chooseQuality() }
         }
-        bar.addView(urlBar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(goBtn)
-        bar.addView(qualityBtn)
-
-        web = WebView(this)
-        root.addView(bar)
-        root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        setContentView(root)
+        val lp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        ).apply { topMargin = dp(8); rightMargin = dp(8) }
+        frame.addView(qualityBtn, lp)
+        setContentView(frame)
 
         web.settings.apply {
             javaScriptEnabled = true
@@ -112,14 +155,20 @@ class MainActivity : Activity() {
             override fun onHideCustomView() {
                 customCallback?.onCustomViewHidden()
                 customView = null
-                setContentView(root)
+                setContentView(frame)
             }
         }
 
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                urlBar.setText(url)
                 inject(view)
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
+                val host = req.url.host ?: return true
+                val ok = host == "kool.to" || host.endsWith(".kool.to")
+                if (!ok) Toast.makeText(this@MainActivity, "Seul kool.to est autorisé", Toast.LENGTH_SHORT).show()
+                return !ok
             }
             override fun onPageFinished(view: WebView, url: String) = inject(view)
 
@@ -134,7 +183,7 @@ class MainActivity : Activity() {
             }
         }
 
-        go(prefs.getString("last", "https://www.google.com") ?: "https://www.google.com")
+        web.loadUrl(homeUrl)
     }
 
     private fun labelFor(h: Int) = if (h == 0) "Auto" else "${h}p"
@@ -144,18 +193,7 @@ class MainActivity : Activity() {
         view.evaluateJavascript("window.__LQ_MAX = $maxHeight;", null)
     }
 
-    private fun go(input: String) {
-        var s = input.trim()
-        if (s.isEmpty()) return
-        s = when {
-            s.startsWith("http://") || s.startsWith("https://") -> s
-            s.contains(" ") || !s.contains(".") ->
-                "https://www.google.com/search?q=" + java.net.URLEncoder.encode(s, "UTF-8")
-            else -> "https://$s"
-        }
-        getSharedPreferences("p", MODE_PRIVATE).edit().putString("last", s).apply()
-        web.loadUrl(s)
-    }
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun chooseQuality() {
         AlertDialog.Builder(this)
