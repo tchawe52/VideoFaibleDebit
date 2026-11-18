@@ -165,10 +165,21 @@ class MainActivity : Activity() {
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
-                val host = req.url.host ?: return true
-                val ok = host == "kool.to" || host.endsWith(".kool.to")
-                if (!ok) Toast.makeText(this@MainActivity, "Seul kool.to est autorisé", Toast.LENGTH_SHORT).show()
-                return !ok
+                val scheme = req.url.scheme ?: return true
+                if (scheme == "retry") { view.loadUrl(homeUrl); return true }
+                // http(s) : on reste dans l'application ; le reste (intent:, market:, ...) est bloqué
+                return !(scheme == "http" || scheme == "https")
+            }
+
+            // Page d'erreur neutre : n'affiche aucune adresse de site
+            override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
+                if (req.isForMainFrame) {
+                    val html = "<html><body style='background:#111;color:#eee;font-family:sans-serif;" +
+                        "text-align:center;padding-top:30vh'><h3>Connexion impossible</h3>" +
+                        "<p>Vérifie ta connexion internet.</p>" +
+                        "<p><a href='retry://go' style='color:#ff4f7b'>Réessayer</a></p></body></html>"
+                    view.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                }
             }
             override fun onPageFinished(view: WebView, url: String) = inject(view)
 
