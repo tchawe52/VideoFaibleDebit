@@ -36,8 +36,8 @@ class MainActivity : Activity() {
     // 0 = désactivé (qualité du site), sinon hauteur max en pixels (144, 240, 360)
     @Volatile private var maxHeight = 240
 
-    private val choices = intArrayOf(144, 240, 360, 0)
-    private val labels = arrayOf("144p", "240p", "360p", "Auto (qualité du site)")
+    private val choices = intArrayOf(72, 90, 96, 120, 144, 240, 360, 0)
+    private val labels = arrayOf("72p", "90p", "96p", "120p", "144p", "240p", "360p", "Auto (qualité du site)")
 
     private val injectedJs = """
         (function(){
