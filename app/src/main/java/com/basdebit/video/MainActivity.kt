@@ -101,6 +101,48 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // Masque tout nom de site (ex. xxx.to) affiché dans le texte des pages
+    private val hideJs = """
+(function(){
+  if (window.__hideInstalled) return;
+  window.__hideInstalled = true;
+  var RE = /(?:https?:\/\/)?\b(?:[a-z0-9-]+\.)+(?:to|yt|com|net|org|io|tv|cc|xyz|sx|ws|wf|pm|ps|cx|fm|vip|club|site|online|top|info|app|dev|ru|fr|de|watch|stream|pro|one|cloud|link|live|cam|fun|icu|bz|nu|gg|vc|ly|tk|ml|cf|ga|gq|us|uk|eu|ch|be|nl|pl|ro|su|lol)\b/gi;
+  var MASK = '\u2022\u2022\u2022\u2022\u2022';
+  var ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
+  function clean() {
+    try {
+      if (!document.body) return;
+      var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+      var n;
+      while ((n = w.nextNode())) {
+        var p = n.parentNode ? n.parentNode.nodeName : '';
+        if (p === 'SCRIPT' || p === 'STYLE' || p === 'TEXTAREA' || p === 'NOSCRIPT') continue;
+        var v = n.nodeValue;
+        if (!v) continue;
+        var nv = v.replace(RE, MASK);
+        if (nv !== v) n.nodeValue = nv;
+      }
+      var els = document.querySelectorAll('[placeholder],[title],[aria-label],[alt]');
+      for (var i = 0; i < els.length; i++) {
+        for (var j = 0; j < ATTRS.length; j++) {
+          var a = els[i].getAttribute(ATTRS[j]);
+          if (a) {
+            var na = a.replace(RE, MASK);
+            if (na !== a) els[i].setAttribute(ATTRS[j], na);
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  var t = 0;
+  new MutationObserver(function () {
+    if (t) return;
+    t = setTimeout(function () { t = 0; clean(); }, 150);
+  }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  clean();
+})();
+""".trimIndent()
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun buildApp() {
         val prefs = getSharedPreferences("p", MODE_PRIVATE)
@@ -202,6 +244,7 @@ class MainActivity : Activity() {
     private fun inject(view: WebView) {
         view.evaluateJavascript(injectedJs.replace("__MAX__", maxHeight.toString()), null)
         view.evaluateJavascript("window.__LQ_MAX = $maxHeight;", null)
+        view.evaluateJavascript(hideJs, null)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
