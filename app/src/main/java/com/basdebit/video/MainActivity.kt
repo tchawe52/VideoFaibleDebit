@@ -97,10 +97,10 @@ class MainActivity : Activity() {
 
     private fun showJournal() {
         val body = synchronized(journal) {
-            if (journal.isEmpty()) "Aucune activité vidéo détectée pour l'instant." else journal.joinToString("\n")
+            if (journal.isEmpty()) "Aucune activité vidéo détectée pour l'instant." else journal.asReversed().joinToString("\n")
         }
         val tv = TextView(this).apply {
-            text = "Qualité choisie : " + labelFor(maxHeight) + "\n\n" + body
+            text = "Qualité choisie : " + labelFor(this@MainActivity.maxHeight) + "\n\n" + body
             textSize = 12f
             setPadding(dp(20), dp(10), dp(20), dp(10))
             setTextIsSelectable(true)
@@ -406,7 +406,7 @@ class MainActivity : Activity() {
             setAllCaps(false)
             textSize = 12f
             setTextColor(Color.WHITE)
-            text = labelFor(maxHeight)
+            text = labelFor(this@MainActivity.maxHeight)
             minHeight = 0
             minimumHeight = 0
             minWidth = 0
@@ -455,9 +455,11 @@ class MainActivity : Activity() {
                 val lvl = m.messageLevel()
                 if (lvl == ConsoleMessage.MessageLevel.ERROR || lvl == ConsoleMessage.MessageLevel.WARNING) {
                     val low = m.message().lowercase()
-                    val keys = listOf("mixed", "blocked", "cors", "net::", "failed", "refused", "certificate",
-                        "insecure", "hls", "manifest", "media", "ssl", "mse", "buffer")
-                    if (keys.any { low.contains(it) }) logEvent("Console : " + scrub(m.message()))
+                    val keys = listOf("blocked", "cors", "net::", "failed", "refused", "certificate",
+                        "hls", "manifest", "media", "ssl", "mse", "buffer")
+                    if (!low.contains("mixed content") && keys.any { low.contains(it) }) {
+                        logEvent("Console : " + scrub(m.message()))
+                    }
                 }
                 return true
             }
