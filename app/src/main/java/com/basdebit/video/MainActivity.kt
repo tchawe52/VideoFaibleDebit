@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.net.Uri
+import android.net.http.SslError
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -55,7 +57,7 @@ class MainActivity : Activity() {
                 lastMsg = msg
                 lastCount = 1
                 journal.add(t + " " + msg)
-                if (journal.size > 80) journal.removeAt(0)
+                if (journal.size > 120) journal.removeAt(0)
             }
             Unit
         }
@@ -66,6 +68,31 @@ class MainActivity : Activity() {
         fun log(msg: String) {
             if (msg.length < 300) logEvent(msg)
         }
+    }
+
+    private fun isMediaUrl(u: Uri): Boolean {
+        val full = u.toString().lowercase()
+        val ext = (u.path ?: "").lowercase().substringAfterLast('.', "")
+        return full.contains(".m3u8") || full.contains(".mpd") || ext in mediaExts
+    }
+
+    private fun kindOf(u: Uri): String {
+        val full = u.toString().lowercase()
+        val ext = (u.path ?: "").lowercase().substringAfterLast('.', "")
+        val k = when {
+            full.contains(".m3u8") -> "m3u8"
+            full.contains(".mpd") -> "mpd"
+            ext in mediaExts -> ext
+            else -> "autre"
+        }
+        return (u.scheme ?: "?") + " ." + k
+    }
+
+    // Retire adresses et noms de sites d'un message avant de l'écrire dans le journal
+    private fun scrub(m: String): String {
+        return m.replace(Regex("https?://[^\\s'\")]+"), "<url>")
+            .replace(Regex("\\b(?:[a-z0-9-]+\\.)+(?:to|yt|com|net|org|io|tv|cc|xyz|me|co|info|live|stream)\\b", RegexOption.IGNORE_CASE), "<site>")
+            .take(180)
     }
 
     private fun showJournal() {
@@ -244,6 +271,14 @@ class MainActivity : Activity() {
     var vs = document.getElementsByTagName('video');
     for (var i = 0; i < vs.length; i++) {
       var v = vs[i];
+      if (!v.__lqE) {
+        v.__lqE = 1;
+        (function (vv) {
+          vv.addEventListener('error', function () {
+            say('Lecteur : erreur code ' + (vv.error ? vv.error.code : '?'));
+          });
+        })(v);
+      }
       if (v.videoHeight > 0 && v.__lqH !== v.videoHeight) {
         v.__lqH = v.videoHeight;
         var src = v.currentSrc || '';
@@ -415,6 +450,17 @@ class MainActivity : Activity() {
                 customView = null
                 setContentView(frame)
             }
+
+            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                val lvl = m.messageLevel()
+                if (lvl == ConsoleMessage.MessageLevel.ERROR || lvl == ConsoleMessage.MessageLevel.WARNING) {
+                    val low = m.message().lowercase()
+                    val keys = listOf("mixed", "blocked", "cors", "net::", "failed", "refused", "certificate",
+                        "insecure", "hls", "manifest", "media", "ssl", "mse", "buffer")
+                    if (keys.any { low.contains(it) }) logEvent("Console : " + scrub(m.message()))
+                }
+                return true
+            }
         }
 
         web.webViewClient = object : WebViewClient() {
@@ -437,6 +483,26 @@ class MainActivity : Activity() {
                         "<p>Vérifie ta connexion internet.</p>" +
                         "<p><a href='retry://go' style='color:#ff4f7b'>Réessayer</a></p></body></html>"
                     view.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+                } else if (isMediaUrl(req.url)) {
+                    logEvent("Erreur réseau : " + err.description + " (" + kindOf(req.url) + ")")
+                }
+            }
+
+            override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, resp: WebResourceResponse) {
+                if (resp.statusCode >= 400 && isMediaUrl(req.url)) {
+                    logEvent("HTTP " + resp.statusCode + " (" + kindOf(req.url) + ")")
+                }
+            }
+
+            // Certificat invalide : toléré pour les serveurs de flux externes, jamais pour le site principal
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                val host = try { java.net.URI(error.url).host } catch (e: Exception) { null } ?: ""
+                val main = Uri.parse(homeUrl).host ?: ""
+                if (host == main || host.endsWith("." + main)) {
+                    handler.cancel()
+                } else {
+                    logEvent("Certificat non valide ignoré (serveur externe)")
+                    handler.proceed()
                 }
             }
             override fun onPageFinished(view: WebView, url: String) = inject(view)
@@ -444,7 +510,7 @@ class MainActivity : Activity() {
             override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): WebResourceResponse? {
                 val full = req.url.toString().lowercase()
                 val ext = (req.url.path ?: "").lowercase().substringAfterLast('.', "")
-                if (ext in mediaExts) logEvent("Média ." + ext)
+                if (ext in mediaExts) logEvent("Média " + (req.url.scheme ?: "?") + " ." + ext)
                 val hls = full.contains(".m3u8")
                 val dash = full.contains(".mpd")
                 val limit = maxHeight
